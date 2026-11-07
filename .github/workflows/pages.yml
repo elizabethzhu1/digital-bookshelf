@@ -1,0 +1,58 @@
+# Builds Digital Bookshelf from the code in elizabethzhu1/bookshelf and
+# publishes it here, at elizabethzhu1.github.io/digital-bookshelf.
+# It checks for new code every hour, and can be run by hand from the Actions tab.
+name: Publish Digital Bookshelf
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.check.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: elizabethzhu1/bookshelf
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 23
+      # Only republish when the app's code has changed since the last publish.
+      - id: check
+        run: |
+          now=$(git rev-parse HEAD)
+          live=$(curl -fsL https://elizabethzhu1.github.io/digital-bookshelf/version.txt || true)
+          if [ "${{ github.event_name }}" != "schedule" ] || [ "$now" != "$live" ]; then echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.check.outputs.changed == 'true'
+        run: |
+          node scripts/build-site.js --maker-only
+          git rev-parse HEAD > _maker/version.txt
+      - if: steps.check.outputs.changed == 'true'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _maker
+
+  deploy:
+    needs: build
+    if: needs.build.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
